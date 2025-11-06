@@ -195,10 +195,12 @@ def train_BPETokenizer(
         if len(top5_pairs) >= 2 and top5_pairs[0][1] == top5_pairs[1][1]:
             print(f"Tie detected: {top5_pairs[0][0]} vs {top5_pairs[1][0]}")
         
-        # 选择频率最高的 pair，如果频率相同则选字典序最小的
-        # 排序规则：1) 频率降序（越大越好） 2) pair 升序（字典序最小）
-        sorted_pairs = sorted(pair_cnt.items(), key=lambda x: (-x[1], x[0]))
-        best_pair = sorted_pairs[0][0]   
+        # 选择频率最高的 pair，如果频率相同则选 tuple 字典序最大的（降序）
+        # 排序规则：1) 频率降序（越大越好） 2) (vocab[pair[0]], vocab[pair[1]]) tuple 字典序降序（最大优先）
+        # 注意：比较的是 (vocab[pair[0]], vocab[pair[1]]) 这个 tuple，而不是合并后的 bytes
+        # 这对应于参考实现中的 ReverseLexOrderPair（在最小堆中反转 tuple 字典序）
+        sorted_pairs = sorted(pair_cnt.items(), key=lambda x: (x[1], (vocab[x[0][0]], vocab[x[0][1]])), reverse=True)
+        best_pair = sorted_pairs[0][0]
         
         # STEP2: update vocab
         index += 1
