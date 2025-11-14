@@ -22,13 +22,39 @@ class BPETokenizer:
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
   
-def process_pretoken(chunk:str) -> dict[bytes, int]:
+def process_pretoken(chunk: str, special_tokens: list[str] | None = None) -> dict[bytes, int]:
     pretoken_freqs = {}
-    result = re.findall(PAT, chunk)
+    
+    # If special tokens are provided, we need to handle them separately
+    if special_tokens:
+        # Build a regex pattern that matches any special token
+        # Sort by length (descending) to match longer tokens first
+        sorted_special_tokens = sorted(special_tokens, key=len, reverse=True)
+        special_pattern = '|'.join(re.escape(token) for token in sorted_special_tokens)
         
-    for each_pretoken in result:
-        bts = each_pretoken.encode("utf-8")
-        pretoken_freqs[bts] = pretoken_freqs.get(bts, 0) + 1
+        # Split the chunk by special tokens, keeping the special tokens
+        parts = re.split(f'({special_pattern})', chunk)
+        
+        for part in parts:
+            if not part:  # Skip empty parts
+                continue
+            
+            if part in special_tokens:
+                # This is a special token, add it as-is without further processing
+                bts = part.encode("utf-8")
+                pretoken_freqs[bts] = pretoken_freqs.get(bts, 0) + 1
+            else:
+                # This is regular text, apply the PAT regex
+                result = re.findall(PAT, part)
+                for each_pretoken in result:
+                    bts = each_pretoken.encode("utf-8")
+                    pretoken_freqs[bts] = pretoken_freqs.get(bts, 0) + 1
+    else:
+        # No special tokens, just apply PAT directly
+        result = re.findall(PAT, chunk)
+        for each_pretoken in result:
+            bts = each_pretoken.encode("utf-8")
+            pretoken_freqs[bts] = pretoken_freqs.get(bts, 0) + 1
         
     return pretoken_freqs
     
@@ -73,7 +99,8 @@ def pre_tokenization(input_path, special_tokens, desired_num_chunks) -> dict[byt
             initial_position += mini_chunk_size
 
     # real pre-token process after chunk split.
-    from multiprocessing import Pool, Process  
+    from multiprocessing import Pool, Process
+    from functools import partial
     num_process = 6
 
 
@@ -85,7 +112,9 @@ def pre_tokenization(input_path, special_tokens, desired_num_chunks) -> dict[byt
         
     all_pretoken_freqs = {}
     with Pool(num_process) as pool:
-        list_of_counters = pool.map(process_pretoken, chunks)
+        # Use partial to pass special_tokens to each process_pretoken call
+        process_func = partial(process_pretoken, special_tokens=special_tokens)
+        list_of_counters = pool.map(process_func, chunks)
 
         for counter in list_of_counters:
             for key, value in counter.items():
@@ -155,14 +184,23 @@ def train_BPETokenizer(
         
     assert(len(vocab) == 256 + len(special_tokens))
     
+    # Convert special tokens to bytes for quick lookup
+    special_tokens_bytes = set(token.encode('utf-8') for token in special_tokens)
+    
     # caculate the pre-tokens map
     int_token_freqs = {}
     for each in all_token_freqs.keys():
-        key_int_list = []
-        for per in each:
-            per_bts = per.to_bytes(1, "little")
-            key_int_list.append(reversed_vocab[per_bts])
-        key_int = tuple(key_int_list)
+        # Check if this pre-token is a special token
+        if each in special_tokens_bytes:
+            # Special tokens are already in the vocab, use their token ID directly
+            key_int = (reversed_vocab[each],)
+        else:
+            # Regular pre-token: convert each byte to its token ID
+            key_int_list = []
+            for per in each:
+                per_bts = per.to_bytes(1, "little")
+                key_int_list.append(reversed_vocab[per_bts])
+            key_int = tuple(key_int_list)
         int_token_freqs[key_int] = all_token_freqs[each]
     
     # get raw pair-count
@@ -190,11 +228,6 @@ def train_BPETokenizer(
     # Main training loop, exit when vocab size reaches the target size.
     while len(vocab) < vocab_size:
         # STEP1: get the max pair, best_pair: tuple(int)
-        # Debug: 查看前5个最大值
-        top5_pairs = sorted(pair_cnt.items(), key=lambda x: x[1], reverse=True)[:5]
-        if len(top5_pairs) >= 2 and top5_pairs[0][1] == top5_pairs[1][1]:
-            print(f"Tie detected: {top5_pairs[0][0]} vs {top5_pairs[1][0]}")
-        
         # 选择频率最高的 pair，如果频率相同则选 tuple 字典序最大的（降序）
         # 排序规则：1) 频率降序（越大越好） 2) (vocab[pair[0]], vocab[pair[1]]) tuple 字典序降序（最大优先）
         # 注意：比较的是 (vocab[pair[0]], vocab[pair[1]]) 这个 tuple，而不是合并后的 bytes
