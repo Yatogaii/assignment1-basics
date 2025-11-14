@@ -1,24 +1,26 @@
 import os
-from typing import Tuple, List
+from typing import Tuple, List, Iterable
 import regex as re
 
 class BPETokenizer:
-    def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]]):
+    def __init__(self, vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens=None):
         self.vocab_size = len(vocab)
         self.merges = merges
         self.vocab = vocab
-        
-    def train(self, data):
-        # Placeholder for training logic
+        self.special_tokens = special_tokens or []
+
+    @classmethod
+    def from_file(cls, vocab_file: str | os.PathLike, merges_file: str | os.PathLike, special_tokens=None):
         pass
     
-    def encode(self, text):
-        # Placeholder for tokenization logic
-        return text.split()  # Simple whitespace tokenizer for illustration
+    def encode(self, text:str) -> list[int]:
+        pass
+
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]:
+        pass
     
-    def decode(self, tokens):
-        # Placeholder for detokenization logic
-        return ' '.join(tokens)
+    def decode(self, ids: list[int]) -> str:
+        pass
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
   
