@@ -28,8 +28,10 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-
-    raise NotImplementedError
+    from cs336_basics.models import LinearModule
+    lm = LinearModule(d_in, d_out)
+    lm.weights.data = weights.clone()
+    return lm.forward(in_features)
 
 
 def run_embedding(
@@ -50,8 +52,11 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-
-    raise NotImplementedError
+    from cs336_basics.models import EmbeddingModel
+    embedModel = EmbeddingModel(vocab_size, d_model)
+    embedModel.weights.data = weights.clone()
+    
+    return embedModel.forward(token_ids)
 
 
 def run_swiglu(
@@ -80,10 +85,13 @@ def run_swiglu(
     # If your state dict keys match, you can use `load_state_dict()`
     # swiglu.load_state_dict(weights)
     # You can also manually assign the weights
-    # swiglu.w1.weight.data = w1_weight
-    # swiglu.w2.weight.data = w2_weight
-    # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    from cs336_basics.models import SwiGLU
+    swiglu = SwiGLU(d_model, d_ff)
+    swiglu.w1.data = w1_weight
+    swiglu.w2.data = w2_weight
+    swiglu.w3.data = w3_weight
+
+    return swiglu.forward(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -378,7 +386,11 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    from cs336_basics.models import RMSNormModel
+    rmsModel = RMSNormModel(d_model=d_model, eps=eps)
+    rmsModel.gain.data = weights.clone()
+    
+    return rmsModel.forward(in_features)
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
@@ -392,7 +404,8 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    from cs336_basics.models import run_SiLU
+    return run_SiLU(in_features)
 
 
 def run_get_batch(
@@ -559,7 +572,8 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    from cs336_basics.bpe_tokenizer import BPETokenizer
+    return BPETokenizer(vocab, merges, special_tokens)
 
 
 def run_train_bpe(
