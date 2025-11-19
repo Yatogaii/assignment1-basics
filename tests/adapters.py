@@ -208,6 +208,9 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
+    from cs336_basics.models import RoPEModel
+    rope = RoPEModel(theta, d_k, max_seq_len)
+    return rope.forward(in_query_or_key, token_positions)
     raise NotImplementedError
 
 
@@ -444,7 +447,8 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    from cs336_basics.nn_utils import run_softmax
+    return run_softmax(in_features, dim)
 
 
 def run_cross_entropy(
