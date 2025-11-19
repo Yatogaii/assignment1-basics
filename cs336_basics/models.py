@@ -2,7 +2,6 @@ import torch
 from math import sqrt
 from einops import einsum,rearrange, reduce, repeat
 from torch.nn.modules.module import Module
-
 from .nn_utils import run_softmax
 class LinearModule(torch.nn.Module):
     def __init__(self, in_features, out_features, device=None, dtype=None):
@@ -120,6 +119,7 @@ class RoPEModel(torch.nn.Module):
         x: (..., seq_len, d_k)
         token_positions: (..., seq_len)
         """
+        assert x.size()[-1] % 2 == 0
         x_even = x[..., 0: : 2]
         x_odd = x[..., 1: : 2]
         
@@ -154,4 +154,43 @@ def run_scaled_dot_product_attention(Q: torch.Tensor, K: torch.Tensor, V: torch.
     softmax_score = run_softmax(scaled_score, dimension=-1)
 
     return einsum(softmax_score, V, "... q_len k_len, ... k_len d_v -> ... q_len d_v")
-    
+
+class MultiHeadAttentionModel(torch.nn.Module):
+    def __init__(self, d_model: int, num_heads: int, device=None, dtype=None):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+
+        assert d_model % num_heads == 0
+        self.d_head = self.d_v = d_model // num_heads
+
+        self.w_qkv =LinearModule(d_model, d_model*3, device=device, dtype=dtype)
+
+        self.out_proj = LinearModule(d_model, d_model, device=device,dtype=dtype)
+        
+
+    def forward(self, x:torch.Tensor, rope: RoPEModel|None=None, positions=None) -> torch.Tensor:
+        seq_len = x.size()[-2]
+        QKV = self.w_qkv.forward(x)
+
+        Q, K, V = QKV.split(self.d_model, dim=-1)
+        Q = rearrange(Q, "b s (h d) -> b h s d", h=self.num_heads)
+        K = rearrange(K, "b s (h d) -> b h s d", h=self.num_heads)
+        V = rearrange(V, "b s (h d) -> b h s d", h=self.num_heads)
+
+        if positions == None:
+            positions = torch.arange(seq_len, device=x.device)
+
+        if rope is not None:
+            Q = rope.forward(Q,positions)
+            K = rope.forward(K,positions)
+
+        mask = torch.ones([seq_len, seq_len], dtype=torch.bool, device=x.device)
+        mask = ~torch.triu(mask, diagonal=1)
+
+        y = run_scaled_dot_product_attention(Q, K, V, mask)
+
+        combined_output = rearrange(y, "b h s hd -> b s (h hd)", h=self.num_heads)
+
+        return self.out_proj.forward(combined_output)
