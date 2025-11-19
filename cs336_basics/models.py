@@ -1,6 +1,6 @@
 import torch
 from math import sqrt
-from einops import einsum,rearrange, reduce
+from einops import einsum,rearrange, reduce, repeat
 from torch.nn.modules.module import Module
 
 class LinearModule(torch.nn.Module):
@@ -92,3 +92,42 @@ class SwiGLU(torch.nn.Module):
     
 def run_SiLU(in_features: torch.Tensor):
     return in_features * torch.sigmoid(in_features)
+
+class RoPEModel(torch.nn.Module):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        super().__init__()
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+
+        half = d_k // 2
+        dim_idx = torch.arange(half)
+        exponent = (2* dim_idx).float() / float(d_k) # (2k-2)/d, shape=(half,)
+        self.freq = 1.0 / (theta ** exponent) # shape = (half,)
+
+        positions = torch.arange(max_seq_len)
+        angles = einsum(self.freq, positions,"half, seq_len -> seq_len half")
+        cos = angles.cos()
+        sin = angles.sin()
+        
+        self.register_buffer("cos_table", cos, persistent=False)
+        self.register_buffer("sin_table", sin, persistent=False)
+        
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        """
+        x: (..., seq_len, d_k)
+        token_positions: (..., seq_len)
+        """
+        x_even = x[..., 0: : 2]
+        x_odd = x[..., 1: : 2]
+        
+        cos_pos = self.cos_table[token_positions]
+        sin_pos = self.sin_table[token_positions]
+
+        x_rot_even = x_even * cos_pos - x_odd * sin_pos
+        x_rot_odd = x_even * sin_pos + x_odd * cos_pos
+
+        x_rot_2d = torch.cat([x_rot_even, x_rot_odd], dim = -1)
+
+        return rearrange([x_rot_even, x_rot_odd], 'two ... half -> ... (half two)')
