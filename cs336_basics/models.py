@@ -3,6 +3,7 @@ from math import sqrt
 from einops import einsum,rearrange, reduce, repeat
 from torch.nn.modules.module import Module
 
+from .nn_utils import run_softmax
 class LinearModule(torch.nn.Module):
     def __init__(self, in_features, out_features, device=None, dtype=None):
         super().__init__()
@@ -131,3 +132,26 @@ class RoPEModel(torch.nn.Module):
         x_rot_2d = torch.cat([x_rot_even, x_rot_odd], dim = -1)
 
         return rearrange([x_rot_even, x_rot_odd], 'two ... half -> ... (half two)')
+    
+def run_scaled_dot_product_attention(Q: torch.Tensor, K: torch.Tensor, V: torch.Tensor, mask=None) -> torch.Tensor:
+    """
+    Params:
+        Q, K -> (batch_size, ..., seq_len, d_k) 
+        V -> (batch_size, ..., seq_len, d_v)
+        Mask(opt) -> Bool(seq_len, seql_len)
+    Return:
+        tensor -> (batch_size, ..., d_v)
+    """
+    # 计算相关性
+    qk_similarity = einsum(Q, K, "... q_len d_k, ... k_len d_k -> ... q_len k_len")
+    # 缩放
+    d_k = Q.size(dim=-1)
+    scaled_score = qk_similarity / sqrt(d_k)
+    # Masking
+    if mask is not None:
+        scaled_score = scaled_score.masked_fill(~mask, float(-1e9)) # 使用 ~ 来取反整个 mask，因为masked_fill默认是填充True的值。
+
+    softmax_score = run_softmax(scaled_score, dimension=-1)
+
+    return einsum(softmax_score, V, "... q_len k_len, ... k_len d_v -> ... q_len d_v")
+    
