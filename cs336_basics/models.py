@@ -14,21 +14,21 @@ class LinearModule(torch.nn.Module):
 
         sigma=2/(in_features+out_features)
         std_dev = sqrt(sigma)
-        self.weights = torch.empty((out_features, in_features), device=device, dtype=dtype)
+        self.weight = torch.empty((out_features, in_features), device=device, dtype=dtype)
         
         torch.nn.init.trunc_normal_(
-            tensor=self.weights,
+            tensor=self.weight,
             mean=0,
             std=std_dev,
             a=-3*std_dev,
             b=3*std_dev,
         )
         
-        self.weights = torch.nn.Parameter(self.weights)
-        assert self.weights.size() == torch.Size([out_features, in_features])
+        self.weight = torch.nn.Parameter(self.weight)
+        assert self.weight.size() == torch.Size([out_features, in_features])
     
     def forward(self, x:torch.Tensor) -> torch.Tensor:
-        return einsum(self.weights, x, "d_out d_in, ... d_in -> ... d_out")
+        return einsum(self.weight, x, "d_out d_in, ... d_in -> ... d_out")
     
 class EmbeddingModel(torch.nn.Module):
     def __init__(self, num_embeddings, embedding_dim, device=None, dtype=None):
@@ -60,7 +60,7 @@ class RMSNormModel(torch.nn.Module):
         self.device = device
         self.dtype = dtype
 
-        self.gain = torch.nn.Parameter(torch.ones(d_model))
+        self.weight = torch.nn.Parameter(torch.ones(d_model))
         
     def forward(self, x: torch.Tensor) -> torch.Tensor: # x -> (batch_size, sequence_length, d_model)
         in_dtpye = x.dtype
@@ -72,22 +72,21 @@ class RMSNormModel(torch.nn.Module):
         # Equal to: rms_a = torch.sqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps) # rms_a -> (batch_size, sequence_length, 1)
         x /= rms_a # PyTorch will broadcase (batch_size,sequence_length, 1) to div x
 
-        x *= self.gain
+        x *= self.weight
 
         return x.to(in_dtpye)
 
 class SwiGLU(torch.nn.Module):
-    def __init__(self, d_model, d_ff):
+    def __init__(self, d_model, d_ff, device=None, dtype=None):
         super().__init__()
-        self.w1 = torch.nn.Parameter(torch.rand((d_ff, d_model)))
-        self.w2 = torch.nn.Parameter(torch.rand((d_model,d_ff)))
-        self.w3 = torch.nn.Parameter(torch.rand((d_ff, d_model)))
+        self.w1 = LinearModule(d_model,d_ff, device=device, dtype=dtype)
+        self.w2 = LinearModule(d_ff,d_model, device=device, dtype=dtype)
+        self.w3 = LinearModule(d_model,d_ff, device=device, dtype=dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor: # x -> (batch_size, seq_length, d_model)
-        silu_res = run_SiLU(einsum(self.w1, x, "d_ff d_model, ... d_model -> ... d_ff"))
-        glu_res = einsum(self.w3, x, "d_ff d_model, ... d_model -> ... d_ff")
-
-        return einsum(self.w2, silu_res*glu_res, "d_model d_ff, ... d_ff -> ... d_model")
+        a1 = self.w1(x)
+        silu = run_SiLU(a1)
+        return self.w2(silu * self.w3(x))
     
     
 def run_SiLU(in_features: torch.Tensor):
@@ -120,8 +119,8 @@ class RoPEModel(torch.nn.Module):
         token_positions: (..., seq_len)
         """
         assert x.size()[-1] % 2 == 0
-        x_even = x[..., 0: : 2]
-        x_odd = x[..., 1: : 2]
+        x_even = x[..., 0:: 2]
+        x_odd = x[..., 1:: 2]
         
         cos_pos = self.cos_table[token_positions]
         sin_pos = self.sin_table[token_positions]
@@ -165,14 +164,14 @@ class MultiHeadAttentionModel(torch.nn.Module):
         assert d_model % num_heads == 0
         self.d_head = self.d_v = d_model // num_heads
 
-        self.w_qkv =LinearModule(d_model, d_model*3, device=device, dtype=dtype)
+        self.wqkv =LinearModule(d_model, d_model*3, device=device, dtype=dtype)
 
-        self.out_proj = LinearModule(d_model, d_model, device=device,dtype=dtype)
+        self.output_proj = LinearModule(d_model, d_model, device=device,dtype=dtype)
         
 
     def forward(self, x:torch.Tensor, rope: RoPEModel|None=None, positions=None) -> torch.Tensor:
         seq_len = x.size()[-2]
-        QKV = self.w_qkv.forward(x)
+        QKV = self.wqkv.forward(x)
 
         Q, K, V = QKV.split(self.d_model, dim=-1)
         Q = rearrange(Q, "b s (h d) -> b h s d", h=self.num_heads)
@@ -193,4 +192,27 @@ class MultiHeadAttentionModel(torch.nn.Module):
 
         combined_output = rearrange(y, "b h s hd -> b s (h hd)", h=self.num_heads)
 
-        return self.out_proj.forward(combined_output)
+        return self.output_proj.forward(combined_output)
+
+class TransformerBlockModel(torch.nn.Module):
+    def __init__(self, d_model, num_heads, d_ff, rope) -> None:
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+
+        self.rope = rope
+        
+
+        self.attn = MultiHeadAttentionModel(d_model, num_heads)
+
+        self.ln1 = RMSNormModel(d_model)
+
+        self.ln2 = RMSNormModel(d_model)
+
+        self.ffn = SwiGLU(d_model, d_ff)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.attn.forward(self.ln1.forward(x), self.rope)
+        x = x + self.ffn.forward(self.ln2.forward(x))
+        return x
