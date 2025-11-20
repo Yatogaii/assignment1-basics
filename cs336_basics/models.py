@@ -47,7 +47,7 @@ class EmbeddingModel(torch.nn.Module):
             a=-3,
             b=3,
         )
-        self.weights = weights
+        self.weights = torch.nn.Parameter(weights)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         return self.weights[token_ids]
@@ -70,11 +70,11 @@ class RMSNormModel(torch.nn.Module):
 
         rms_a = torch.sqrt(reduce(x**2, "... d -> ... 1", "mean") + self.eps)
         # Equal to: rms_a = torch.sqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps) # rms_a -> (batch_size, sequence_length, 1)
-        x /= rms_a # PyTorch will broadcase (batch_size,sequence_length, 1) to div x
+        x_1 = x/ rms_a # PyTorch will broadcase (batch_size,sequence_length, 1) to div x
 
-        x *= self.weight
+        x_2 = x_1 * self.weight
 
-        return x.to(in_dtpye)
+        return x_2.to(in_dtpye)
 
 class SwiGLU(torch.nn.Module):
     def __init__(self, d_model, d_ff, device=None, dtype=None):
