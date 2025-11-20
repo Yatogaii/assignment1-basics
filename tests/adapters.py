@@ -30,7 +30,7 @@ def run_linear(
     """
     from cs336_basics.models import LinearModule
     lm = LinearModule(d_in, d_out)
-    lm.weights.data = weights.clone()
+    lm.weight.data = weights.clone()
     return lm.forward(in_features)
 
 
@@ -87,9 +87,9 @@ def run_swiglu(
     # You can also manually assign the weights
     from cs336_basics.models import SwiGLU
     swiglu = SwiGLU(d_model, d_ff)
-    swiglu.w1.data = w1_weight
-    swiglu.w2.data = w2_weight
-    swiglu.w3.data = w3_weight
+    swiglu.w1.weight.data = w1_weight
+    swiglu.w2.weight.data = w2_weight
+    swiglu.w3.weight.data = w3_weight
 
     return swiglu.forward(in_features)
 
@@ -149,8 +149,8 @@ def run_multihead_self_attention(
     """
     from cs336_basics.models import MultiHeadAttentionModel, RoPEModel
     multiHead = MultiHeadAttentionModel(d_model, num_heads)
-    multiHead.w_qkv.weights.data = torch.cat([q_proj_weight,k_proj_weight,v_proj_weight], dim=0).clone()
-    multiHead.out_proj.weights.data = o_proj_weight.clone()
+    multiHead.wqkv.weight.data = torch.cat([q_proj_weight,k_proj_weight,v_proj_weight], dim=0).clone()
+    multiHead.output_proj.weight.data = o_proj_weight.clone()
 
 
     return multiHead.forward(in_features)
@@ -195,8 +195,8 @@ def run_multihead_self_attention_with_rope(
     """
     from cs336_basics.models import MultiHeadAttentionModel, RoPEModel
     multiHead = MultiHeadAttentionModel(d_model, num_heads)
-    multiHead.w_qkv.weights.data = torch.cat([q_proj_weight,k_proj_weight,v_proj_weight], dim=0).clone()
-    multiHead.out_proj.weights.data = o_proj_weight.clone()
+    multiHead.wqkv.weight.data = torch.cat([q_proj_weight,k_proj_weight,v_proj_weight], dim=0).clone()
+    multiHead.output_proj.weight.data = o_proj_weight.clone()
 
     rope = RoPEModel(theta, d_model//num_heads, max_seq_len)
 
@@ -298,7 +298,22 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    from cs336_basics.models import TransformerBlockModel,RoPEModel
+    rope = RoPEModel(theta, d_model//num_heads, max_seq_len)
+    block = TransformerBlockModel(d_model, num_heads, d_ff, rope)
+    weights["attn.wqkv.weight"] = torch.cat(
+        [
+            weights["attn.q_proj.weight"],
+            weights["attn.k_proj.weight"],
+            weights["attn.v_proj.weight"],
+        ], dim=0
+    )
+    weights.pop("attn.q_proj.weight")
+    weights.pop("attn.k_proj.weight")
+    weights.pop("attn.v_proj.weight")
+    block.load_state_dict(weights)
+
+    return block.forward(in_features)
 
 
 def run_transformer_lm(
@@ -405,7 +420,7 @@ def run_rmsnorm(
     """
     from cs336_basics.models import RMSNormModel
     rmsModel = RMSNormModel(d_model=d_model, eps=eps)
-    rmsModel.gain.data = weights.clone()
+    rmsModel.weight.data = weights.clone()
     
     return rmsModel.forward(in_features)
 
