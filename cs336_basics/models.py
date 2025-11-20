@@ -47,10 +47,10 @@ class EmbeddingModel(torch.nn.Module):
             a=-3,
             b=3,
         )
-        self.weights = torch.nn.Parameter(weights)
+        self.weight = torch.nn.Parameter(weights)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-        return self.weights[token_ids]
+        return self.weight[token_ids]
 
 class RMSNormModel(torch.nn.Module):
     def __init__(self, d_model: int, eps:float =1e-5, device=None, dtype=None):
@@ -216,3 +216,34 @@ class TransformerBlockModel(torch.nn.Module):
         x = x + self.attn.forward(self.ln1.forward(x), self.rope)
         x = x + self.ffn.forward(self.ln2.forward(x))
         return x
+
+class TransformerLM(torch.nn.Module):
+    def __init__(self,
+                vocab_size: int,
+                context_length: int,
+                d_model: int,
+                num_layers: int,
+                num_heads: int ,
+                d_ff: int,
+                rope_theta:float
+            ):
+        super().__init__()
+        self.token_embeddings = EmbeddingModel(vocab_size, d_model)
+        self.rope = RoPEModel(rope_theta, d_model//num_heads, context_length)
+        self.num_layers = num_layers
+        self.layers = torch.nn.ModuleList(
+            [TransformerBlockModel(d_model, num_heads, d_ff, self.rope) for _ in range(num_layers)]
+        )
+        self.ln_final = RMSNormModel(d_model)
+        self.lm_head = LinearModule(d_model,vocab_size)
+
+    def forward(self, in_features):
+        x = self.token_embeddings(in_features)
+        for layer in self.layers:
+            x = layer(x)
+        
+        norm_x = self.ln_final(x)
+        linear_out = self.lm_head(norm_x)
+
+        return linear_out
+

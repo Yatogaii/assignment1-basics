@@ -54,7 +54,7 @@ def run_embedding(
     """
     from cs336_basics.models import EmbeddingModel
     embedModel = EmbeddingModel(vocab_size, d_model)
-    embedModel.weights.data = weights.clone()
+    embedModel.weight.data = weights.clone()
     
     return embedModel.forward(token_ids)
 
@@ -395,7 +395,30 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    from cs336_basics.models import TransformerLM
+    transformer = TransformerLM(
+        vocab_size,
+        context_length,
+        d_model,
+        num_layers,
+        num_heads,
+        d_ff,
+        rope_theta
+    )
+    for i in range(num_layers):
+        weights[f"layers.{i}.attn.wqkv.weight"] = torch.cat(
+            [
+                weights[f"layers.{i}.attn.q_proj.weight"],
+                weights[f"layers.{i}.attn.k_proj.weight"],
+                weights[f"layers.{i}.attn.v_proj.weight"],
+            ], dim=0
+        )
+        weights.pop(f"layers.{i}.attn.q_proj.weight")
+        weights.pop(f"layers.{i}.attn.k_proj.weight")
+        weights.pop(f"layers.{i}.attn.v_proj.weight")
+
+    transformer.load_state_dict(weights)
+    return transformer.forward(in_indices)
 
 
 def run_rmsnorm(
